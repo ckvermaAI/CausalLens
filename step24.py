@@ -1,7 +1,7 @@
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from tqdm import tqdm
-import torch
+import json
 
 # Load model and tokenizer
 model_name = "Qwen/Qwen3-8B"
@@ -59,7 +59,8 @@ for idx, row in tqdm(df.iterrows(), total=len(df)):
             "qa_output": f"Error: {str(e)}"
         })
 
-output_df = pd.DataFrame(results)
-out_path = "data/step24_multientity_QA.csv"
-output_df.to_csv(out_path, index=False)
+out_path = "data/step24_multientity_QA.jsonl"
+with open(out_path, "w", encoding="utf-8") as f:
+    for item in results:
+        f.write(json.dumps(item, ensure_ascii=False) + "\n")
 print(f"Saved QA results to {out_path}")
