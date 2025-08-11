@@ -1,89 +1,74 @@
-import pandas as pd
+import json
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-import time
 
-# === CONFIG ===
-input_csv = "qa_pairs_qwen_generated.csv"
-output_csv = "evaluation_results.csv"
-model_id = "Qwen/Qwen3-1.7B"
-max_patients = 1  # Set to an integer to limit how many rows to process
+from sentence_transformers import SentenceTransformer, util
+model_emb = SentenceTransformer('all-MiniLM-L6-v2')
 
-# === Load model ===
-print("🔁 Loading Qwen model...")
+def is_meaningfully_changed(orig, new, threshold=0.85):
+    emb1 = model_emb.encode(orig, convert_to_tensor=True)
+    emb2 = model_emb.encode(new, convert_to_tensor=True)
+    sim = util.pytorch_cos_sim(emb1, emb2).item()
+    return sim < threshold
+
+
+# Load the data from the input file
+input_file = "data/step3_intervention.jsonl"
+with open(input_file, "r") as f:
+    data = json.load(f)
+
+# === Model setup ===
+model_id = "Qwen/Qwen3-8B"
+print("🔁 Loading model...")
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True, device_map="auto")
 generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
-# === Evaluation prompt ===
-def build_eval_prompt(subject_id, factual_q, factual_a, counterfactual_q, counterfactual_a):
-    return f"""
-You are a clinical QA evaluator.
+qa_data = data
 
-Evaluate whether the following question-answer pairs are accurate and logically consistent with the discharge summary. Provide a short justification and mark each answer as Yes or No.
+def ask_qwen(summary, question):
+    prompt = f"""
+You are a clinical reasoning assistant.
 
-Subject ID: {subject_id}
+Given the discharge summary, answer the following question as accurately and concisely as possible. Start the answer with yes or no, followed by a brief explanation.
 
-Factual QA:
-Q1: {factual_q}
-A1: {factual_a}
+Discharge Summary:
+\"\"\"{summary.strip()}\"\"\"
 
-Counterfactual QA:
-Q2: {counterfactual_q}
-A2: {counterfactual_a}
+Question: {question}
+Answer:"""
+    response = generator(prompt, max_new_tokens=64, do_sample=True, temperature=0.7)[0]['generated_text']
+    return response[len(prompt):].strip()
 
-Respond in this format:
-Factual Answer Correct: Yes/No
-Counterfactual Answer Correct: Yes/No
-Comment: <short explanation>
-"""
-
-# === Load QA pairs ===
-df = pd.read_csv(input_csv)
-if max_patients:
-    df = df.head(max_patients)
-
+# === Run interventional tests ===
 results = []
 
-# === Loop through QA pairs and evaluate ===
-print(f"🧠 Evaluating {len(df)} QA pairs...")
-for idx, row in df.iterrows():
-    subject_id = row["subject_id"]
-    factual_q = row["factual_question"]
-    factual_a = row["factual_answer"]
-    counterfactual_q = row["counterfactual_question"]
-    counterfactual_a = row["counterfactual_answer"]
+for item in qa_data:
+    # Step 1: Original Summary
+    fact_original = ask_qwen(item["discharge_summary"], item["factual_q"])
+    cf_original = ask_qwen(item["discharge_summary"], item["counter_q"])
 
-    prompt = build_eval_prompt(subject_id, factual_q, factual_a, counterfactual_q, counterfactual_a)
-    try:
-        output = generator(prompt, max_new_tokens=300, do_sample=True, temperature=0.7)[0]['generated_text']
-        result_text = output[len(prompt):].strip()
+    # Step 2: Intervened Summary
+    fact_new = ask_qwen(item["discharge_summary_intervened"], item["factual_q"])
+    cf_new = ask_qwen(item["discharge_summary_intervened"], item["counter_q"])
 
-        # Extract answers
-        factual_correct = "Yes" if "Factual Answer Correct: Yes" in result_text else "No"
-        counterfactual_correct = "Yes" if "Counterfactual Answer Correct: Yes" in result_text else "No"
+    print(f"{fact_original=}\n{cf_original=}\n{fact_new=}\n{cf_new=}")
+    # Step 3: Compare
+    fact_changed = is_meaningfully_changed(fact_original, fact_new)
+    cf_changed = is_meaningfully_changed(cf_original, cf_new)
 
-        comment_start = result_text.find("Comment:")
-        comment = result_text[comment_start + 8:].strip() if comment_start != -1 else ""
-
-        results.append({
-            "subject_id": subject_id,
-            "factual_correct": factual_correct,
-            "counterfactual_correct": counterfactual_correct,
-            "qwen_comment_summary": comment
-        })
-
-        print(f"✅ Evaluated subject_id {subject_id}")
-        time.sleep(1)  # Avoid rate limit
-
-    except Exception as e:
-        print(f"❌ Error evaluating subject_id {subject_id}: {e}")
-        results.append({
-            "subject_id": subject_id,
-            "factual_correct": "Error",
-            "counterfactual_correct": "Error",
-            "qwen_comment_summary": str(e)
-        })
+    # Step 4: Save
+    results.append({
+        "changed_factual": fact_changed,
+        "changed_counterfactual": cf_changed,
+        "factual_original": fact_original,
+        "factual_intervened": fact_new,
+        "counterfactual_original": cf_original,
+        "counterfactual_intervened": cf_new
+    })
 
 # === Save results ===
-pd.DataFrame(results).to_csv(output_csv, index=False)
-print(f"\n✅ All evaluations complete. Results saved to {output_csv}")
+out_path = "./data/step4_evaluation.jsonl"
+with open(out_path, "w") as f:
+    for item in results:
+        f.write(json.dumps(item, indent=2) + "\n")
+print(f"\n✅ Results saved to {out_path}")
