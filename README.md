@@ -1,4 +1,4 @@
-# CausalLens: Probing LLMs’ Clinical Reasoning through QA-Driven Causal Inference
+# CausalLens: Probing LLMs’ Clinical Reasoning through QA-Driven Causal Inference [Paper](https://github.com/ckvermaAI/CausalLens/blob/main/CausalLens_paper.pdf)
 
 Large Language Models (LLMs) hold significant potential for advancing clinical decision support, yet their capacity for causal reasoning in healthcare remains underexplored. We introduce CausalLens, a structured framework that generates diverse, clinically grounded causal question–answer (QA) pairs from MIMIC-IV discharge summaries. These pairs encompass medications, laboratory findings, and diagnoses, enabling a targeted evaluation of LLMs’ ability to discern cause-and-effect relationships in complex patient scenarios. By systematically probing LLM responses through controlled interventions, CausalLens exposes limitations in LLM causal reasoning and provides a reproducible pipeline for evaluating performance, enabling the development of safer, more reliable AI in clinical decision support.
 
