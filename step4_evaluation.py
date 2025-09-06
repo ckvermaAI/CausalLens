@@ -29,7 +29,7 @@ def ask_qwen(summary, question):
     prompt = f"""
 You are a clinical reasoning assistant.
 
-Given the discharge summary, answer the following question as accurately and concisely as possible. Start the answer with yes or no, followed by a brief explanation.
+Given the discharge summary, answer the following question as accurately and concisely as possible.
 
 Discharge Summary:
 \"\"\"{summary.strip()}\"\"\"
